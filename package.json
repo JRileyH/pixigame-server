@@ -1,0 +1,22 @@
+{
+  "name": "pixigame-server",
+  "version": "1.0.0",
+  "description": "Node server for PixiGame",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Sleepy-Fish/pixigame-server.git"
+  },
+  "author": "J Riley Harrington <JRileyHarrington@gmail.com>",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/Sleepy-Fish/pixigame-server/issues"
+  },
+  "homepage": "https://github.com/Sleepy-Fish/pixigame-server#readme",
+  "dependencies": {
+    "socket.io": "^2.0.3"
+  }
+}
