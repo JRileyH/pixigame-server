@@ -5,15 +5,12 @@ const port = process.env.PORT || 1337;
 io.on('connect', onConnect);
 server.listen(port, () => console.log('server listening on port ' + port));
 
-var network = require('./network')();
-
- 
-
 function onConnect(socket){
     console.log('connect ' + socket.id);
+    var network = require('./network')(socket, io);
 
-    var hole = network.packet('001')();
-    socket.on(hole.Name, data =>{hole.recieve(data);});
+    network.packet('creation');
+    network.packet('movement');
     
     socket.on('disconnect', () => console.log('disconnect ' + socket.id));
 }

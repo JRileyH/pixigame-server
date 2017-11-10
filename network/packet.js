@@ -1,23 +1,41 @@
 module.exports = class Packet{
-    constructor(recipient, data){
-        this._recipient = recipient;
-        this._data = data;
+    constructor(socket, all_sockets){
         this._name = null;
+        this._socket = socket;
+        this._all_sockets = all_sockets;
     }
 
     get Name(){
         return this._name;
     }
 
-    send(recipient, data){
-        let to = recipient===undefined?this._recipient:recipient;
-        let payload = data===undefined?this._data:data;
-        Game.Network.socket.emit(this._name, payload);
+    get Socket(){
+        return this._socket;
     }
 
-    recieve(packet){
-        console.log('recieving');
-        console.log(packet);
+    init(){
+        this._socket.on(this._name, this.recieve.bind(this));
+    }
+
+    send(data){
+        if(data===undefined)data = {};
+        data._sender = 'server';
+        data._timestamp = new Date().getTime();
+        switch(data._recipient){
+            case 'self':
+                this._socket.emit(this._name, data)
+            break;
+            case 'others':
+                this._socket.broadcast.emit(this._name, data)
+            break;
+            case 'all':
+            default:
+                this._all_sockets.emit(this._name, data)
+        }
+    }
+
+    recieve(data){
+        this.send(data);
     }
 }
 
