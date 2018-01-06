@@ -17,6 +17,7 @@
   },
   "homepage": "https://github.com/Sleepy-Fish/pixigame-server#readme",
   "dependencies": {
+    "redis": "^2.8.0",
     "socket.io": "^2.0.3"
   }
 }
