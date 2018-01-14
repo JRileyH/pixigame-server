@@ -1,6 +1,7 @@
 const server = require('http').createServer();
 const redis = require('redis');
 const db = redis.createClient();
+const db_multi = db.multi();
 const db_events = redis.createClient();
 db_events.subscribe('__keyevent@0__:expired')
 db.config("SET","notify-keyspace-events", "Ex");
@@ -11,6 +12,26 @@ const expiration = 600;
 db.on('connect', function(){
     db.flushdb();//tmp flush for cleanliness
 });
+
+//Validates the existance of a GUID and returns performs a callback with either new GUID or existing GUID and boolean to determine if it had already existed
+validateGUID = function(guid, set, length, pool, cb){
+    if(typeof guid==='undefined' || guid==null){
+        newGUID(set, length, pool, function(new_guid){
+            cb(new_guid, false);
+        });
+    } else {
+        db.sismember(set, guid, function(err, exists){
+            if(err) throw err;
+            if(!exists){
+                newGUID(set, length, pool, function(new_guid){
+                    cb(new_guid, false);
+                });
+            } else {
+                cb(guid, true);
+            }
+        });
+    }
+}
 
 newGUID = function(set, length, pool, cb){
     var _count = 0;
@@ -42,23 +63,29 @@ createClient = function(client){
         }
         db.expire('client:'+client.cid, expiration);
         io.sockets.connected[client.sid].emit('create_cid', {cid: client.cid, expiration: expiration});
+
+
         if(typeof client.rid!=='undefined' && client.rid!=null){
-            db.hset('room:'+client.rid, 'rid', client.rid);
+            db.hset('room:'+client.rid, 'client:'+client.cid, client.sid);
             db.expire('room:'+client.rid, expiration);
-            io.sockets.connected[client.sid].emit('create_rid', {rid: client.rid, expiration: expiration});
         }
 
-        //Do what ever connection means
-        console.log('CONNECT: '+client.cid)
-        db.smembers('all_cids', function(err, cids){
-            console.log('----------')
-            for(var cid of cids){
-                db.hgetall('client:'+cid, function(err, all){
+        //broadcast room update
+        if(client.rid){
+            db.hgetall('room:'+client.rid, function(err, all){
+                if(err) throw err;
+                for(var client in all){
+                    db_multi.hgetall(client)
+                }
+                db_multi.exec(function(err, members){
                     if(err) throw err;
-                    console.log(all);
-                });
-            }
-        });
+                    for(let member of members){
+                        io.sockets.connected[member.sid].emit('update_room', members);
+                    }
+                })
+            });
+        }
+        
     }
 }
 
@@ -79,54 +106,39 @@ db_events.on('message', function(event, entry){
     }
 });
 
-validateRoom = function(rid, cb){
-    if(typeof rid==='undefined' || rid==null){
-        newGUID('all_rids', 4, "ABCDEFGHIJKLMNOPQRSTUVWXYZ", function(new_rid){
-            cb(new_rid);
-        });
-    } else {
-        db.sismember('all_rids', rid, function(err, exists){
-            if(err) throw err;
-            if(!exists){
-                newGUID('all_rids', 4, "ABCDEFGHIJKLMNOPQRSTUVWXYZ", function(new_rid){
-                    cb(new_rid);
-                });
-            } else {
-                cb(rid);
-            }
-        });
-    }
-}
-validateClient = function(cid, cb){
-    if(typeof cid==='undefined' || cid==null){
-        newGUID('all_cids', 24, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz", function(new_cid){
-            cb(new_cid);
-        });
-    } else {
-        db.sismember('all_cids', cid, function(err, exists){
-            if(err) throw err;
-            if(!exists){
-                newGUID('all_cids', 24, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz", function(new_cid){
-                    cb(new_cid);
-                });
-            } else {
-                cb(cid);
-            }
-        });
-    }
-}
+
 
 //===Incoming Client Socket Connections===\\
 io.on('connect', function(socket){
-    validateClient(socket.handshake.query['cid'], function(cid){
-        createClient({cid:cid, sid:socket.id});
+    validateGUID(socket.handshake.query['cid'], 'all_cids', 24, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz", function(cid, existed){
+        if(existed){
+            db.hgetall('client:'+cid, function(err, client){
+                client.cid = cid;
+                client.sid = socket.id;
+                if(client.rid){
+                    if(client.role==='host'){
+                        io.sockets.connected[client.sid].emit('connect_host', client);
+                    } else if(client.role==='guest'){
+                        io.sockets.connected[client.sid].emit('connect_guest', client);
+                    } else {
+                        io.sockets.connected[client.sid].emit('connect_request');
+                    }
+                } else {
+                    io.sockets.connected[client.sid].emit('connect_request');
+                }
+                createClient(client);
+            });
+        } else {
+            io.sockets.connected[client.sid].emit('connect_request');
+            createClient({cid:cid, sid:socket.id});
+        }
     });
 
     
     socket.on('host', function(data){
-        validateClient(data.cid, function(cid){
+        validateGUID(data.cid, 'all_cids', 24, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz", function(cid, existed){
             data.cid = cid;
-            validateRoom(socket.handshake.query['rid'], function(rid){
+            validateGUID(data.rid, 'all_rids', 4, "ABCDEFGHIJKLMNOPQRSTUVWXYZ", function(rid, existed){
                 data.rid = rid;
                 createClient(data);
             });
@@ -134,14 +146,24 @@ io.on('connect', function(socket){
     });
 
     socket.on('join', function(data){
-        validateClient(data.cid, function(cid){
-            data.cid = cid;
-            createClient(data);
-        })
+        if(typeof data.rid === 'string' && data.rid.length != 4) {
+            console.error('VALID RID NOT PROVIDED: '+data.rid)
+        } else {
+            validateGUID(data.cid, 'all_cids', 24, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz", function(cid, existed){
+                data.cid = cid;
+                db.sismember('all_rids', data.rid, function(err, exists){
+                    if(exists){
+                        createClient(data);
+                    } else {
+                        console.error('VALID RID NOT PROVIDED: '+data.rid)
+                    }
+                });
+            })
+        }
     });
 
 });
 
 
 
-server.listen(1337, () => console.log('server listening on port 1337'));
+server.listen(1337, () => console.info('server listening on port 1337'));
