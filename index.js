@@ -129,7 +129,7 @@ io.on('connect', function(socket){
                 createClient(client);
             });
         } else {
-            io.sockets.connected[client.sid].emit('connect_request');
+            io.sockets.connected[socket.id].emit('connect_request');
             createClient({cid:cid, sid:socket.id});
         }
     });
